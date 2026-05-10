@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # La base de données PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: kiibare_db
+    environment:
+      POSTGRES_DB: kiibare_db
+      POSTGRES_USER: kiibare_user
+      POSTGRES_PASSWORD: kiibare_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kiibare_user -d kiibare_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Le Backend (Django + Django Ninja)
+  backend:
+    build: ./backend
+    container_name: kiibare_backend
+    command: >
+      bash -c "
+        echo '⏳ Attente de la base de données...' &&
+        sleep 3 &&
+        python manage.py makemigrations --noinput &&
+        python manage.py migrate --noinput &&
+        echo '✅ Migrations appliquées !' &&
+        python manage.py runserver 0.0.0.0:8000
+      "
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://kiibare_user:kiibare_password@db:5432/kiibare_db
+      - POSTGRES_DB=kiibare_db
+      - POSTGRES_USER=kiibare_user
+      - POSTGRES_PASSWORD=kiibare_password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DEBUG=True
+    restart: unless-stopped
+
+  # Le Frontend (Next.js)
+  frontend:
+    build: ./frontend
+    container_name: kiibare_frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Utilise le node_modules du conteneur, pas celui de Windows
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - WATCHPACK_POLLING=true # Nécessaire pour le hot-reload Next.js sur Docker Windows
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
